@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Servidor: 127.0.0.1
--- Tiempo de generación: 21-11-2025 a las 05:16:19
+-- Tiempo de generación: 09-12-2025 a las 23:46:29
 -- Versión del servidor: 10.4.32-MariaDB
 -- Versión de PHP: 8.0.30
 
@@ -158,6 +158,25 @@ CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_familia_insertar` (IN `p_tipo_do
     );
 END$$
 
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_foto_insertar` (IN `p_usuario_familia_id` INT, IN `p_nombre_archivo` VARCHAR(255), IN `p_ruta_archivo` VARCHAR(500), IN `p_tamano` INT, IN `p_tipo_mime` VARCHAR(50))   BEGIN
+    INSERT INTO fotos (
+        usuario_familia_id,
+        nombre_archivo,
+        ruta_archivo,
+        `tamaño`,
+        tipo_mime
+    ) VALUES (
+        p_usuario_familia_id,
+        p_nombre_archivo,
+        p_ruta_archivo,
+        p_tamano,
+        p_tipo_mime
+    );
+
+    -- Devolver id de la foto
+    SELECT LAST_INSERT_ID() AS foto_id;
+END$$
+
 CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_get_events` ()   BEGIN
   SELECT id AS ID_correlativo, nombre, fecha_inicio, fecha_fin, lugar, estado
   FROM eventos
@@ -181,6 +200,108 @@ CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_incrementar_intentos` (IN `p_ema
         SET intentos = intentos + 1
         WHERE email = p_email;
     END IF;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_lienzos_listar_por_evento` (IN `p_evento_id` INT)   BEGIN
+    SELECT
+        l.id,
+        l.usuario_familia_id,
+        l.plantilla_id,
+        l.nombre,
+        l.estado,
+        l.fecha_actualizacion,
+        f.nombres,
+        f.apellidos,
+        f.email,
+        f.nombre_familiar,
+        f.apellidos_familiar
+    FROM lienzos l
+    INNER JOIN familias f ON f.id = l.usuario_familia_id
+    WHERE f.evento_id = p_evento_id
+    ORDER BY l.fecha_actualizacion DESC;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_lienzo_guardar` (IN `p_familia_id` INT, IN `p_plantilla_id` INT, IN `p_nombre` VARCHAR(200), IN `p_datos_lienzo` LONGTEXT, IN `p_estado` ENUM('borrador','finalizado'))   BEGIN
+    DECLARE v_id INT;
+
+    SELECT id
+      INTO v_id
+      FROM lienzos
+     WHERE usuario_familia_id = p_familia_id
+     ORDER BY fecha_actualizacion DESC
+     LIMIT 1;
+
+    IF v_id IS NULL THEN
+        INSERT INTO lienzos (
+            usuario_familia_id,
+            plantilla_id,
+            nombre,
+            datos_lienzo,
+            estado
+        ) VALUES (
+            p_familia_id,
+            p_plantilla_id,
+            p_nombre,
+            p_datos_lienzo,
+            p_estado
+        );
+    ELSE
+        UPDATE lienzos
+           SET plantilla_id    = p_plantilla_id,
+               nombre          = p_nombre,
+               datos_lienzo    = p_datos_lienzo,
+               estado          = p_estado,
+               fecha_actualizacion = NOW()
+         WHERE id = v_id;
+    END IF;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_lienzo_obtener_por_familia` (IN `p_usuario_familia_id` INT)   BEGIN
+    SELECT
+        id,
+        usuario_familia_id,
+        plantilla_id,
+        nombre,
+        datos_lienzo,
+        estado,
+        fecha_creacion,
+        fecha_actualizacion
+    FROM lienzos
+    WHERE usuario_familia_id = p_usuario_familia_id
+    ORDER BY fecha_actualizacion DESC
+    LIMIT 1;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_lienzo_obtener_por_id` (IN `p_id` INT, IN `p_usuario_familia_id` INT)   BEGIN
+    SELECT
+        id,
+        usuario_familia_id,
+        plantilla_id,
+        nombre,
+        datos_lienzo,
+        estado,
+        fecha_creacion,
+        fecha_actualizacion
+    FROM lienzos
+    WHERE id = p_id
+      AND usuario_familia_id = p_usuario_familia_id
+    LIMIT 1;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_lienzo_obtener_ultimo` (IN `p_usuario_familia_id` INT)   BEGIN
+    SELECT
+        id,
+        usuario_familia_id,
+        plantilla_id,
+        nombre,
+        datos_lienzo,
+        estado,
+        fecha_creacion,
+        fecha_actualizacion
+    FROM lienzos
+    WHERE usuario_familia_id = p_usuario_familia_id
+    ORDER BY fecha_actualizacion DESC, fecha_creacion DESC
+    LIMIT 1;
 END$$
 
 CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_listar_eventos` ()   BEGIN
@@ -254,6 +375,21 @@ CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_login_familia` (IN `p_email` VAR
     FROM familias
     WHERE email = p_email
     LIMIT 1;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_obtener_evento` (IN `p_id` INT)   BEGIN
+    SELECT 
+        id,
+        nombre,
+        fecha_inicio,
+        fecha_fin,
+        lugar,
+        estado,
+        descripcion,
+        fecha_creacion,
+        fecha_actualizacion
+    FROM eventos
+    WHERE id = p_id;
 END$$
 
 CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_obtener_familia` (IN `p_id` INT)   BEGIN
@@ -336,7 +472,7 @@ CREATE TABLE `administradores` (
 --
 
 INSERT INTO `administradores` (`id`, `nombre`, `email`, `password`, `rol`, `estado`, `intentos`, `fecha_creacion`, `fecha_actualizacion`) VALUES
-(1, 'Victor Admin', 'admin@vyrproducciones.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'activo', 0, '2025-11-09 01:59:18', '2025-11-16 05:18:09');
+(1, 'Victor Admin', 'admin@vyrproducciones.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'activo', 0, '2025-11-09 01:59:18', '2025-12-08 22:56:30');
 
 -- --------------------------------------------------------
 
@@ -391,7 +527,7 @@ CREATE TABLE `familias` (
 --
 
 INSERT INTO `familias` (`id`, `tipo_documento`, `numero_documento`, `nombres`, `apellidos`, `email`, `password`, `evento_id`, `nombre_familiar`, `apellidos_Familiar`, `estado`, `fecha_creacion`, `fecha_actualizacion`, `intentos`) VALUES
-(1, 'dni', '09940846', 'Marco Antonio', 'Quintana Camarena', 'marcoquintan@hotmail.com', '$2y$10$7Qd/DDANF1oK2QfgwAEjnex6pLx59pOtqvFma3omDQY4Eb668Tqyq', 1, 'Carlo Marco', 'Quintana Saavedra', 'activo', '2025-11-15 19:46:13', '2025-11-15 21:05:03', 0);
+(1, 'dni', '09940846', 'Marco Antonio', 'Quintana Camarena', 'marcoquintan@hotmail.com', '$2y$10$7Qd/DDANF1oK2QfgwAEjnex6pLx59pOtqvFma3omDQY4Eb668Tqyq', 1, 'Carlo Marco', 'Quintana Saavedra', 'activo', '2025-11-15 19:46:13', '2025-12-05 03:58:09', 0);
 
 -- --------------------------------------------------------
 
@@ -554,7 +690,7 @@ ALTER TABLE `fotos`
 -- AUTO_INCREMENT de la tabla `lienzos`
 --
 ALTER TABLE `lienzos`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT de la tabla `plantillas_lienzos`
