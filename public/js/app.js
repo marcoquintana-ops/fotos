@@ -1,757 +1,545 @@
 // public/js/app.js
-// Editor de lienzo VyR Producciones
-// - Soporta plantillas P1..P10
-// - Drag & drop de imágenes sobre cada marco
-// - Botones + / - / carpeta en cada marco
-// - Línea de doblez vertical discontinua
-// - Guarda/carga usando process/lienzo_process.php
 
 (function () {
-    "use strict";
+    const cfg = window.LIENZO_CONFIG || {};
+    const familiaId = cfg.familiaId || 0;
 
-    // ==========================
-    // CONFIGURACIÓN BÁSICA
-    // ==========================
+    const canvasInner = document.getElementById('canvasInner');
+    const templatesBar = document.getElementById('templatesBar');
+    const btnGuardar = document.getElementById('btnGuardarLienzo');
+    const toastMsg = document.getElementById('toastMsg');
 
-    const familiaId = (window.VYR_LIENZO && window.VYR_LIENZO.familiaId) ? window.VYR_LIENZO.familiaId : 0;
-    const API_URL = "../process/lienzo_process.php";
-
-    // Tamaño físico del lienzo (cm)
-    const CM_WIDTH = 60.5;
-    const CM_HEIGHT = 25.4;
-    const ASPECT_RATIO = CM_WIDTH / CM_HEIGHT; // ~2.38
-
-    // Conversión aproximada mm -> px (96 DPI aprox => 3.78 px/mm)
-    const MM_TO_PX = 3.78;
-    const SEPARACION_MM = 2;
-    const SEPARACION_PX = SEPARACION_MM * MM_TO_PX; // ~7-8 px
-
-    // ==========================
-    // REFERENCIAS DOM
-    // ==========================
-
-    const canvas = document.getElementById("lienzoCanvas");
-    const ctx = canvas.getContext("2d");
-    const plantillasBar = document.getElementById("plantillasBar");
-    const slotControlsContainer = document.getElementById("slotControlsContainer");
-    const btnGuardar = document.getElementById("btnGuardarLienzo");
-    const fileInputHidden = document.getElementById("fileInputHidden");
-
-    if (!canvas || !ctx || !plantillasBar || !slotControlsContainer) {
-        console.error("Editor de lienzo: elementos DOM no encontrados.");
+    if (!canvasInner || !templatesBar || !btnGuardar) {
+        console.error('Editor de lienzo: elementos base no encontrados.');
         return;
     }
 
-    // ==========================
-    // DEFINICIÓN DE PLANTILLAS
-    // ==========================
+    // ============================
+    // UTILIDAD PARA TOAST MENSAJES
+    // ============================
+    function showToast(msg, tipo = 'info') {
+        if (!toastMsg) return;
+        toastMsg.classList.remove('d-none', 'alert-info', 'alert-success', 'alert-danger', 'alert-warning');
+        let clase = 'alert-info';
+        if (tipo === 'ok') clase = 'alert-success';
+        else if (tipo === 'error') clase = 'alert-danger';
+        else if (tipo === 'warn') clase = 'alert-warning';
+        toastMsg.classList.add(clase);
+        toastMsg.textContent = msg;
+        setTimeout(() => {
+            toastMsg.classList.add('d-none');
+        }, 4000);
+    }
 
-    // Cada plantilla define slots en coordenadas relativas [0..1] dentro del área útil.
-    // hasMargin: indica si tiene margen blanco alrededor.
-    const PLANTILLAS = [
-        // P1: 4 fotos (2x2, sin margen)
+    // ======================================
+    // DEFINICIÓN DE PLANTILLAS (10 layouts)
+    // ======================================
+    const TEMPLATES = [
+        // P1: 4 fotos iguales (2x2, sin margen).
         {
-            id: 1, name: "P1", hasMargin: false,
+            id: 1, nombre: 'P1',
+            outerMargin: 0,
             slots: [
-                { x: 0,   y: 0,   w: 0.5, h: 0.5 },
-                { x: 0.5, y: 0,   w: 0.5, h: 0.5 },
-                { x: 0,   y: 0.5, w: 0.5, h: 0.5 },
-                { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }
+                { x: 0, y: 0,   w: 50, h: 50 },
+                { x: 50, y: 0,  w: 50, h: 50 },
+                { x: 0, y: 50,  w: 50, h: 50 },
+                { x: 50, y: 50, w: 50, h: 50 }
             ]
         },
-        // P2: 4 fotos con margen
+        // P2: margen completo; 4 fotos en rejilla interna.
         {
-            id: 2, name: "P2", hasMargin: true,
+            id: 2, nombre: 'P2',
+            outerMargin: 6,
             slots: [
-                { x: 0,   y: 0,   w: 0.5, h: 0.5 },
-                { x: 0.5, y: 0,   w: 0.5, h: 0.5 },
-                { x: 0,   y: 0.5, w: 0.5, h: 0.5 },
-                { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }
+                { x: 0,  y: 0,  w: 50, h: 50 },
+                { x: 50, y: 0,  w: 50, h: 50 },
+                { x: 0,  y: 50, w: 50, h: 50 },
+                { x: 50, y: 50, w: 50, h: 50 }
             ]
         },
-        // P3: 5 fotos (1 superior panorámica + 4 abajo)
+        // P3: 5 fotos, una grande izquierda y 4 en cuadrícula derecha.
         {
-            id: 3, name: "P3", hasMargin: false,
+            id: 3, nombre: 'P3',
+            outerMargin: 0,
             slots: [
-                { x: 0,   y: 0,    w: 1.0, h: 0.4 },
-                { x: 0,   y: 0.4,  w: 0.5, h: 0.3 },
-                { x: 0.5, y: 0.4,  w: 0.5, h: 0.3 },
-                { x: 0,   y: 0.7,  w: 0.5, h: 0.3 },
-                { x: 0.5, y: 0.7,  w: 0.5, h: 0.3 }
+                { x: 0,  y: 0,   w: 45, h: 100 }, // grande
+                { x: 55, y: 0,   w: 45, h: 50 },
+                { x: 55, y: 50,  w: 22.5, h: 50 },
+                { x: 77.5, y: 50, w: 22.5, h: 25 },
+                { x: 77.5, y: 75, w: 22.5, h: 25 }
             ]
         },
-        // P4: 5 fotos con margen
+        // P4: margen superior/inferior, 4 fotos verticales iguales
         {
-            id: 4, name: "P4", hasMargin: true,
+            id: 4, nombre: 'P4',
+            outerMargin: 8,
             slots: [
-                { x: 0,   y: 0,    w: 1.0, h: 0.4 },
-                { x: 0,   y: 0.4,  w: 0.5, h: 0.3 },
-                { x: 0.5, y: 0.4,  w: 0.5, h: 0.3 },
-                { x: 0,   y: 0.7,  w: 0.5, h: 0.3 },
-                { x: 0.5, y: 0.7,  w: 0.5, h: 0.3 }
+                { x: 0,  y: 0, w: 25, h: 100 },
+                { x: 25, y: 0, w: 25, h: 100 },
+                { x: 50, y: 0, w: 25, h: 100 },
+                { x: 75, y: 0, w: 25, h: 100 }
             ]
         },
-        // P5: 6 fotos (3x2 sin margen)
+        // P5: 6 fotos (2 filas x 3 columnas)
         {
-            id: 5, name: "P5", hasMargin: false,
+            id: 5, nombre: 'P5',
+            outerMargin: 0,
             slots: [
-                { x: 0,    y: 0,   w: 1/3, h: 0.5 },
-                { x: 1/3,  y: 0,   w: 1/3, h: 0.5 },
-                { x: 2/3,  y: 0,   w: 1/3, h: 0.5 },
-                { x: 0,    y: 0.5, w: 1/3, h: 0.5 },
-                { x: 1/3,  y: 0.5, w: 1/3, h: 0.5 },
-                { x: 2/3,  y: 0.5, w: 1/3, h: 0.5 }
+                { x: 0,     y: 0,   w: 33.33, h: 50 },
+                { x: 33.33, y: 0,   w: 33.33, h: 50 },
+                { x: 66.66, y: 0,   w: 33.34, h: 50 },
+                { x: 0,     y: 50,  w: 33.33, h: 50 },
+                { x: 33.33, y: 50,  w: 33.33, h: 50 },
+                { x: 66.66, y: 50,  w: 33.34, h: 50 }
             ]
         },
-        // P6: 6 fotos con margen
+        // P6: margen completo, 6 fotos (3x2) internas
         {
-            id: 6, name: "P6", hasMargin: true,
+            id: 6, nombre: 'P6',
+            outerMargin: 7,
             slots: [
-                { x: 0,    y: 0,   w: 1/3, h: 0.5 },
-                { x: 1/3,  y: 0,   w: 1/3, h: 0.5 },
-                { x: 2/3,  y: 0,   w: 1/3, h: 0.5 },
-                { x: 0,    y: 0.5, w: 1/3, h: 0.5 },
-                { x: 1/3,  y: 0.5, w: 1/3, h: 0.5 },
-                { x: 2/3,  y: 0.5, w: 1/3, h: 0.5 }
+                { x: 0,     y: 0,   w: 33.33, h: 50 },
+                { x: 33.33, y: 0,   w: 33.33, h: 50 },
+                { x: 66.66, y: 0,   w: 33.34, h: 50 },
+                { x: 0,     y: 50,  w: 33.33, h: 50 },
+                { x: 33.33, y: 50,  w: 33.33, h: 50 },
+                { x: 66.66, y: 50,  w: 33.34, h: 50 }
             ]
         },
-        // P7: 7 fotos (2 arriba + 3 centro + 2 abajo)
+        // P7: 7 fotos (una grande arriba y 6 pequeñas abajo)
         {
-            id: 7, name: "P7", hasMargin: false,
+            id: 7, nombre: 'P7',
+            outerMargin: 0,
             slots: [
-                { x: 0,    y: 0,    w: 0.5, h: 0.33 },
-                { x: 0.5,  y: 0,    w: 0.5, h: 0.33 },
-                { x: 0,    y: 0.33, w: 1/3, h: 0.34 },
-                { x: 1/3,  y: 0.33, w: 1/3, h: 0.34 },
-                { x: 2/3,  y: 0.33, w: 1/3, h: 0.34 },
-                { x: 0,    y: 0.67, w: 0.5, h: 0.33 },
-                { x: 0.5,  y: 0.67, w: 0.5, h: 0.33 }
+                { x: 0,    y: 0,  w: 100,   h: 45 },    // grande
+                { x: 0,    y: 55, w: 16.66, h: 45 },
+                { x: 16.66,y: 55, w: 16.66, h: 45 },
+                { x: 33.32,y: 55, w: 16.66, h: 45 },
+                { x: 49.98,y: 55, w: 16.66, h: 45 },
+                { x: 66.64,y: 55, w: 16.66, h: 45 },
+                { x: 83.30,y: 55, w: 16.70, h: 45 }
             ]
         },
-        // P8: 7 fotos con otra distribución sin margen
+        // P8: 8 fotos (4x2 sin margen)
         {
-            id: 8, name: "P8", hasMargin: false,
+            id: 8, nombre: 'P8',
+            outerMargin: 0,
             slots: [
-                { x: 0,    y: 0,    w: 0.4, h: 0.5 },
-                { x: 0.4,  y: 0,    w: 0.6, h: 0.25 },
-                { x: 0.4,  y: 0.25, w: 0.6, h: 0.25 },
-                { x: 0,    y: 0.5,  w: 0.33, h: 0.5 },
-                { x: 0.33, y: 0.5,  w: 0.34, h: 0.5 },
-                { x: 0.67, y: 0.5,  w: 0.33, h: 0.25 },
-                { x: 0.67, y: 0.75, w: 0.33, h: 0.25 }
+                { x: 0,   y: 0,   w: 25, h: 50 },
+                { x: 25,  y: 0,   w: 25, h: 50 },
+                { x: 50,  y: 0,   w: 25, h: 50 },
+                { x: 75,  y: 0,   w: 25, h: 50 },
+                { x: 0,   y: 50,  w: 25, h: 50 },
+                { x: 25,  y: 50,  w: 25, h: 50 },
+                { x: 50,  y: 50,  w: 25, h: 50 },
+                { x: 75,  y: 50,  w: 25, h: 50 }
             ]
         },
-        // P9: 8 fotos (4x2 sin margen)
+        // P9: 5 fotos (2 grandes + 3 pequeñas)
         {
-            id: 9, name: "P9", hasMargin: false,
-            slots: (function(){
-                const arr = [];
-                for (let row=0; row<2; row++) {
-                    for (let col=0; col<4; col++) {
-                        arr.push({
-                            x: col/4,
-                            y: row/2,
-                            w: 1/4,
-                            h: 0.5
-                        });
-                    }
-                }
-                return arr;
-            })()
+            id: 9, nombre: 'P9',
+            outerMargin: 0,
+            slots: [
+                { x: 0,     y: 0,   w: 50,    h: 60 },
+                { x: 50,    y: 0,   w: 50,    h: 60 },
+                { x: 0,     y: 60,  w: 33.33, h: 40 },
+                { x: 33.33, y: 60,  w: 33.33, h: 40 },
+                { x: 66.66, y: 60,  w: 33.34, h: 40 }
+            ]
         },
-        // P10: 8 fotos con margen
+        // P10: margen completo + mezcla
         {
-            id: 10, name: "P10", hasMargin: true,
-            slots: (function(){
-                const arr = [];
-                for (let row=0; row<2; row++) {
-                    for (let col=0; col<4; col++) {
-                        arr.push({
-                            x: col/4,
-                            y: row/2,
-                            w: 1/4,
-                            h: 0.5
-                        });
-                    }
-                }
-                return arr;
-            })()
+            id: 10, nombre: 'P10',
+            outerMargin: 7,
+            slots: [
+                { x: 0,   y: 0,   w: 40, h: 60 },
+                { x: 40, y: 0,   w: 60, h: 30 },
+                { x: 40, y: 30,  w: 30, h: 30 },
+                { x: 70, y: 30,  w: 30, h: 30 },
+                { x: 0,   y: 60, w: 25, h: 40 },
+                { x: 25,  y: 60, w: 25, h: 40 },
+                { x: 50,  y: 60, w: 25, h: 40 },
+                { x: 75,  y: 60, w: 25, h: 40 }
+            ]
         }
     ];
 
-    // ==========================
-    // ESTADO ACTUAL
-    // ==========================
-
-    const state = {
-        plantillaId: 1,
-        canvasWidth: 0,
-        canvasHeight: 0,
-        slots: [],       // se llena al seleccionar plantilla
-        slotRects: [],   // posición real en px de cada slot
-        draggingSlotIndex: null,
-        dragStartX: 0,
-        dragStartY: 0,
-        dragStartOffsetX: 0,
-        dragStartOffsetY: 0
-    };
-
-    // ==========================
-    // UTILIDADES
-    // ==========================
-
-    function getPlantillaById(id) {
-        return PLANTILLAS.find(p => p.id === id);
-    }
-
-    function resizeCanvasToContainer() {
-        const wrapper = canvas.parentElement;
-        if (!wrapper) return;
-
-        const padding = 20; // espacio dentro del wrapper
-        const maxWidth = wrapper.clientWidth - padding;
-        const maxHeight = wrapper.clientHeight - padding;
-
-        if (maxWidth <= 0 || maxHeight <= 0) return;
-
-        // mantenemos relación 25.4 x 60.5
-        let width = maxWidth;
-        let height = width / ASPECT_RATIO;
-        if (height > maxHeight) {
-            height = maxHeight;
-            width = height * ASPECT_RATIO;
-        }
-
-        canvas.width = Math.round(width);
-        canvas.height = Math.round(height);
-
-        state.canvasWidth = canvas.width;
-        state.canvasHeight = canvas.height;
-
-        // Re-dibujar
-        updateSlotRects();
-        drawCanvas();
-        positionSlotControls();
-    }
-
-    function updateSlotRects() {
-        const plantilla = getPlantillaById(state.plantillaId);
-        if (!plantilla) return;
-        const cw = state.canvasWidth;
-        const ch = state.canvasHeight;
-
-        let marginPx = plantilla.hasMargin ? SEPARACION_PX * 2 : 0; // margen alrededor
-        const innerX = marginPx;
-        const innerY = marginPx;
-        const innerW = cw - marginPx * 2;
-        const innerH = ch - marginPx * 2;
-
-        state.slotRects = plantilla.slots.map(slot => {
-            const x = innerX + slot.x * innerW;
-            const y = innerY + slot.y * innerH;
-            const w = slot.w * innerW;
-            const h = slot.h * innerH;
-            return { x, y, w, h };
-        });
-
-        // Si cambia el tamaño, mantener offsets relativos (no hacemos nada especial aquí, se verán algo diferentes al redimensionar)
-    }
-
-    function clearCanvas() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-
-    function drawCanvas() {
-        clearCanvas();
-        const cw = state.canvasWidth;
-        const ch = state.canvasHeight;
-
-        // Fondo gris
-        ctx.fillStyle = "#4b5563";
-        ctx.fillRect(0, 0, cw, ch);
-
-        const plantilla = getPlantillaById(state.plantillaId);
-        if (!plantilla) return;
-
-        // Área blanca principal (con o sin margen)
-        let marginPx = plantilla.hasMargin ? SEPARACION_PX * 2 : 0;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(marginPx, marginPx, cw - 2*marginPx, ch - 2*marginPx);
-
-        // Línea de doblez vertical discontinua (solo en editor)
-        ctx.save();
-        ctx.setLineDash([10, 6]);
-        ctx.strokeStyle = "#9ca3af";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(cw / 2, marginPx);
-        ctx.lineTo(cw / 2, ch - marginPx);
-        ctx.stroke();
-        ctx.restore();
-
-        // Dibujar cada slot (marco blanco de separación y foto si existe)
-        ctx.lineWidth = SEPARACION_PX;
-        ctx.strokeStyle = "#ffffff";
-
-        state.slotRects.forEach((rect, i) => {
-            // Borde del slot para simular separación
-            ctx.strokeRect(rect.x + SEPARACION_PX/2,
-                           rect.y + SEPARACION_PX/2,
-                           rect.w - SEPARACION_PX,
-                           rect.h - SEPARACION_PX);
-
-            const slot = state.slots[i];
-            if (slot && slot.image) {
-                // Dibujar imagen con escala y offset
-                const img = slot.image;
-                const scale = slot.scale;
-                const offsetX = slot.offsetX;
-                const offsetY = slot.offsetY;
-
-                const imgW = img.width * scale;
-                const imgH = img.height * scale;
-                const centerX = rect.x + rect.w / 2 + offsetX;
-                const centerY = rect.y + rect.h / 2 + offsetY;
-                const drawX = centerX - imgW / 2;
-                const drawY = centerY - imgH / 2;
-
-                ctx.save();
-                // Clip al rect del slot
-                ctx.beginPath();
-                ctx.rect(rect.x + SEPARACION_PX/2,
-                         rect.y + SEPARACION_PX/2,
-                         rect.w - SEPARACION_PX,
-                         rect.h - SEPARACION_PX);
-                ctx.clip();
-
-                ctx.drawImage(img, drawX, drawY, imgW, imgH);
-
-                ctx.restore();
-            }
-        });
-    }
-
-    function initStateForPlantilla(plantillaId) {
-        const plantilla = getPlantillaById(plantillaId);
-        if (!plantilla) return;
-
-        const oldSlots = state.slots || [];
-        const newSlots = [];
-
-        for (let i = 0; i < plantilla.slots.length; i++) {
-            if (oldSlots[i]) {
-                newSlots.push(oldSlots[i]);
-            } else {
-                newSlots.push({
-                    image: null,
-                    imgSrc: null,
-                    scale: 1,
-                    offsetX: 0,
-                    offsetY: 0
-                });
-            }
-        }
-
-        state.plantillaId = plantillaId;
-        state.slots = newSlots;
-
-        updateSlotRects();
-        drawCanvas();
-        buildSlotControls();
-    }
-
-    // ==========================
-    // CONTROLES POR SLOT
-    // ==========================
-
-    function buildSlotControls() {
-        slotControlsContainer.innerHTML = "";
-        const rects = state.slotRects;
-
-        rects.forEach((r, index) => {
-            const div = document.createElement("div");
-            div.className = "slot-controls";
-            div.dataset.slotIndex = index;
-
-            // Posicionar aprox. en esquina superior izquierda del slot
-            div.style.left = (r.x + 8) + "px";
-            div.style.top = (r.y + 8) + "px";
-
-            const btnPlus = document.createElement("button");
-            btnPlus.type = "button";
-            btnPlus.className = "slot-btn slot-btn-plus";
-            btnPlus.title = "Acercar";
-            btnPlus.addEventListener("click", () => zoomSlot(index, 1.1));
-
-            const btnMinus = document.createElement("button");
-            btnMinus.type = "button";
-            btnMinus.className = "slot-btn slot-btn-minus";
-            btnMinus.title = "Alejar";
-            btnMinus.addEventListener("click", () => zoomSlot(index, 0.9));
-
-            const btnFolder = document.createElement("button");
-            btnFolder.type = "button";
-            btnFolder.className = "slot-btn slot-btn-folder";
-            btnFolder.title = "Seleccionar imagen";
-            btnFolder.addEventListener("click", () => openFileForSlot(index));
-
-            div.appendChild(btnPlus);
-            div.appendChild(btnMinus);
-            div.appendChild(btnFolder);
-
-            slotControlsContainer.appendChild(div);
-        });
-    }
-
-    function positionSlotControls() {
-        const rects = state.slotRects;
-        const controls = slotControlsContainer.querySelectorAll(".slot-controls");
-        controls.forEach(ctrl => {
-            const idx = parseInt(ctrl.dataset.slotIndex, 10);
-            const r = rects[idx];
-            if (!r) return;
-            ctrl.style.left = (r.x + 8) + "px";
-            ctrl.style.top = (r.y + 8) + "px";
-        });
-    }
-
-    function zoomSlot(index, factor) {
-        const slot = state.slots[index];
-        if (!slot || !slot.image) return;
-        slot.scale *= factor;
-        if (slot.scale < 0.1) slot.scale = 0.1;
-        if (slot.scale > 10) slot.scale = 10;
-        drawCanvas();
-    }
-
-    // ==========================
-    // CARGA DE IMÁGENES
-    // ==========================
-
-    let currentSlotForFile = null;
-
-    function openFileForSlot(index) {
-        currentSlotForFile = index;
-        fileInputHidden.value = "";
-        fileInputHidden.click();
-    }
-
-    fileInputHidden.addEventListener("change", function (e) {
-        const file = e.target.files && e.target.files[0];
-        if (!file || currentSlotForFile === null) return;
-
-        const reader = new FileReader();
-        reader.onload = function (ev) {
-            const img = new Image();
-            img.onload = function () {
-                setImageInSlot(currentSlotForFile, img, ev.target.result);
-            };
-            img.src = ev.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
-
-    function setImageInSlot(index, img, src) {
-        const rect = state.slotRects[index];
-        if (!rect) return;
-
-        // Calcular escala inicial para cubrir el slot (sin que ninguna dimensión sea menor que el marco)
-        const scaleX = rect.w / img.width;
-        const scaleY = rect.h / img.height;
-        const scale = Math.max(scaleX, scaleY) * 1.1; // 10% más grande
-
-        state.slots[index] = {
-            image: img,
-            imgSrc: src,
-            scale: scale,
-            offsetX: 0,
-            offsetY: 0
-        };
-
-        drawCanvas();
-    }
-
-    // ==========================
-    // DRAG & DROP DESDE DISCO
-    // ==========================
-
-    canvas.addEventListener("dragover", function (e) {
-        e.preventDefault();
-    });
-
-    canvas.addEventListener("drop", function (e) {
-        e.preventDefault();
-        if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-
-        const rectCanvas = canvas.getBoundingClientRect();
-        const x = e.clientX - rectCanvas.left;
-        const y = e.clientY - rectCanvas.top;
-
-        const slotIndex = findSlotIndexAtPoint(x, y);
-        if (slotIndex === null) return;
-
-        const file = e.dataTransfer.files[0];
-        if (!file.type.startsWith("image/")) return;
-
-        const reader = new FileReader();
-        reader.onload = function (ev) {
-            const img = new Image();
-            img.onload = function () {
-                setImageInSlot(slotIndex, img, ev.target.result);
-            };
-            img.src = ev.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
-
-    function findSlotIndexAtPoint(x, y) {
-        for (let i = 0; i < state.slotRects.length; i++) {
-            const r = state.slotRects[i];
-            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-                return i;
-            }
-        }
-        return null;
-    }
-
-    // ==========================
-    // MOVER IMAGEN DENTRO DEL SLOT
-    // ==========================
-
-    canvas.addEventListener("mousedown", function (e) {
-        const rectCanvas = canvas.getBoundingClientRect();
-        const x = e.clientX - rectCanvas.left;
-        const y = e.clientY - rectCanvas.top;
-
-        const idx = findSlotIndexAtPoint(x, y);
-        if (idx === null) return;
-
-        const slot = state.slots[idx];
-        if (!slot || !slot.image) return;
-
-        state.draggingSlotIndex = idx;
-        state.dragStartX = x;
-        state.dragStartY = y;
-        state.dragStartOffsetX = slot.offsetX;
-        state.dragStartOffsetY = slot.offsetY;
-    });
-
-    canvas.addEventListener("mousemove", function (e) {
-        if (state.draggingSlotIndex === null) return;
-
-        const rectCanvas = canvas.getBoundingClientRect();
-        const x = e.clientX - rectCanvas.left;
-        const y = e.clientY - rectCanvas.top;
-
-        const dx = x - state.dragStartX;
-        const dy = y - state.dragStartY;
-
-        const slot = state.slots[state.draggingSlotIndex];
-        slot.offsetX = state.dragStartOffsetX + dx;
-        slot.offsetY = state.dragStartOffsetY + dy;
-
-        drawCanvas();
-    });
-
-    canvas.addEventListener("mouseup", function () {
-        state.draggingSlotIndex = null;
-    });
-    canvas.addEventListener("mouseleave", function () {
-        state.draggingSlotIndex = null;
-    });
-
-    // ==========================
-    // BARRA DE PLANTILLAS (miniaturas)
-    // ==========================
-
-    function buildPlantillasBar() {
-        plantillasBar.innerHTML = "";
-        PLANTILLAS.forEach(p => {
-            const thumb = document.createElement("div");
-            thumb.className = "plantilla-thumb";
-            thumb.dataset.plantillaId = p.id;
-
-            // Margen interno si corresponde
-            let inner = thumb;
-            if (p.hasMargin) {
-                const marginDiv = document.createElement("div");
-                marginDiv.className = "plantilla-thumb-inner-margin";
-                thumb.appendChild(marginDiv);
-                inner = marginDiv;
+    let currentTemplateId = 1;
+    let slotState = []; // {slotId, scale, offsetX, offsetY, imageSrc}
+
+    // ========================================
+    // CONSTRUIR BARRA DE PLANTILLAS (THUMBS)
+    // ========================================
+    function buildTemplateThumbs() {
+        const existing = templatesBar.querySelectorAll('.template-thumb');
+        existing.forEach(e => e.remove());
+
+        TEMPLATES.forEach(t => {
+            const thumb = document.createElement('div');
+            thumb.className = 'template-thumb';
+            thumb.dataset.templateId = t.id;
+
+            const inner = document.createElement('div');
+            inner.className = 'template-thumb-inner';
+
+            // margen blanco para ciertas plantillas
+            if (t.outerMargin > 0) {
+                const margin = document.createElement('div');
+                margin.className = 'thumb-margin';
+                inner.appendChild(margin);
             }
 
-            // Slots como pequeños bloques
-            p.slots.forEach(s => {
-                const slotDiv = document.createElement("div");
-                slotDiv.className = "plantilla-thumb-slot";
-                slotDiv.style.left = (s.x * 100) + "%";
-                slotDiv.style.top = (s.y * 100) + "%";
-                slotDiv.style.width = (s.w * 100) + "%";
-                slotDiv.style.height = (s.h * 100) + "%";
+            t.slots.forEach((s) => {
+                const slotDiv = document.createElement('div');
+                slotDiv.className = 'thumb-slot';
+                const margin = t.outerMargin;
+                const baseLeft = margin + (s.x * (100 - 2 * margin) / 100);
+                const baseTop  = margin + (s.y * (100 - 2 * margin) / 100);
+                const baseW    = (s.w * (100 - 2 * margin) / 100);
+                const baseH    = (s.h * (100 - 2 * margin) / 100);
+                slotDiv.style.left   = baseLeft + '%';
+                slotDiv.style.top    = baseTop + '%';
+                slotDiv.style.width  = baseW + '%';
+                slotDiv.style.height = baseH + '%';
                 inner.appendChild(slotDiv);
             });
 
-            thumb.addEventListener("click", () => {
-                selectPlantilla(p.id);
+            thumb.appendChild(inner);
+            templatesBar.appendChild(thumb);
+
+            thumb.addEventListener('click', () => {
+                setCurrentTemplate(t.id);
+            });
+        });
+
+        // seleccionar por defecto la primera
+        setCurrentTemplate(currentTemplateId);
+    }
+
+    // ======================
+    // RENDER DE UN TEMPLADO
+    // ======================
+    function setCurrentTemplate(id) {
+        currentTemplateId = id;
+
+        // marcar selección en thumbs
+        templatesBar.querySelectorAll('.template-thumb').forEach(el => {
+            const tId = parseInt(el.dataset.templateId, 10);
+            el.classList.toggle('selected', tId === id);
+        });
+
+        const tpl = TEMPLATES.find(x => x.id === id);
+        if (!tpl) return;
+
+        slotState = [];
+
+        // limpiar lienzo
+        Array.from(canvasInner.querySelectorAll('.photo-slot')).forEach(el => el.remove());
+
+        const outerMargin = tpl.outerMargin; // porcentaje
+        tpl.slots.forEach((s, idx) => {
+            const slot = document.createElement('div');
+            slot.className = 'photo-slot';
+            slot.dataset.slotId = String(idx);
+
+            const left = outerMargin + (s.x * (100 - 2 * outerMargin) / 100);
+            const top  = outerMargin + (s.y * (100 - 2 * outerMargin) / 100);
+            const w    = (s.w * (100 - 2 * outerMargin) / 100);
+            const h    = (s.h * (100 - 2 * outerMargin) / 100);
+
+            slot.style.left   = left + '%';
+            slot.style.top    = top + '%';
+            slot.style.width  = w + '%';
+            slot.style.height = h + '%';
+
+            const inner = document.createElement('div');
+            inner.className = 'photo-slot-inner';
+
+            const img = document.createElement('img');
+            img.className = 'slot-image';
+            img.draggable = false;
+
+            const controls = document.createElement('div');
+            controls.className = 'slot-controls';
+
+            const btnMinus = document.createElement('button');
+            btnMinus.className = 'slot-btn';
+            btnMinus.textContent = '−';
+            btnMinus.dataset.title = 'Zoom -';
+
+            const btnPlus = document.createElement('button');
+            btnPlus.className = 'slot-btn';
+            btnPlus.textContent = '+';
+            btnPlus.dataset.title = 'Zoom +';
+
+            const btnFolder = document.createElement('button');
+            btnFolder.className = 'slot-btn';
+            btnFolder.textContent = '📁';
+            btnFolder.dataset.title = 'Cargar foto';
+
+            controls.appendChild(btnMinus);
+            controls.appendChild(btnPlus);
+            controls.appendChild(btnFolder);
+
+            inner.appendChild(img);
+            inner.appendChild(controls);
+            slot.appendChild(inner);
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/*';
+            fileInput.className = 'hidden-input';
+            slot.appendChild(fileInput);
+
+            canvasInner.appendChild(slot);
+
+            // estado inicial
+            slotState.push({
+                slotId: idx,
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                imageSrc: null
             });
 
-            plantillasBar.appendChild(thumb);
-        });
+            btnPlus.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                changeZoom(idx, 1.1);
+            });
+            btnMinus.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                changeZoom(idx, 1 / 1.1);
+            });
+            btnFolder.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                fileInput.click();
+            });
 
-        markSelectedPlantilla(state.plantillaId);
-    }
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files && fileInput.files[0]) {
+                    loadImageIntoSlot(idx, fileInput.files[0], img);
+                }
+            });
 
-    function markSelectedPlantilla(id) {
-        const thumbs = plantillasBar.querySelectorAll(".plantilla-thumb");
-        thumbs.forEach(t => {
-            const pid = parseInt(t.dataset.plantillaId, 10);
-            if (pid === id) t.classList.add("selected");
-            else t.classList.remove("selected");
-        });
-    }
+            // drag & drop directo
+            slot.addEventListener('dragover', (ev) => {
+                ev.preventDefault();
+                slot.style.outline = '2px dashed #00bcd4';
+            });
+            slot.addEventListener('dragleave', () => {
+                slot.style.outline = 'none';
+            });
+            slot.addEventListener('drop', (ev) => {
+                ev.preventDefault();
+                slot.style.outline = 'none';
+                const file = ev.dataTransfer.files && ev.dataTransfer.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    loadImageIntoSlot(idx, file, img);
+                }
+            });
 
-    function selectPlantilla(id) {
-        initStateForPlantilla(id);
-        markSelectedPlantilla(id);
-    }
-
-    // ==========================
-    // GUARDAR / CARGAR LIENZO
-    // ==========================
-
-    function serializeLienzo() {
-        const plantilla = getPlantillaById(state.plantillaId);
-        if (!plantilla) return null;
-
-        const datos = {
-            plantilla_id: state.plantillaId,
-            slots: state.slots.map((s, index) => {
-                return {
-                    index: index,
-                    imgSrc: s.imgSrc || null,
-                    scale: s.scale,
-                    offsetX: s.offsetX,
-                    offsetY: s.offsetY
-                };
-            })
-        };
-        return datos;
-    }
-
-    function guardarLienzo() {
-        if (!familiaId) {
-            alert("No se pudo identificar la familia. Inicie sesión nuevamente.");
-            return;
-        }
-
-        const datosLienzo = serializeLienzo();
-        if (!datosLienzo) {
-            alert("No hay datos de lienzo para guardar.");
-            return;
-        }
-
-        const payload = {
-            usuario_familia_id: familiaId,
-            plantilla_id: state.plantillaId,
-            nombre: "Lienzo familia " + (window.VYR_LIENZO && window.VYR_LIENZO.nombreFamiliar ? window.VYR_LIENZO.nombreFamiliar : ""),
-            datos_lienzo: datosLienzo
-        };
-
-        fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        })
-        .then(r => r.json())
-        .then(j => {
-            if (j.ok) {
-                alert("Lienzo guardado correctamente.");
-            } else {
-                alert(j.message || "No se pudo guardar el lienzo.");
-            }
-        })
-        .catch(() => {
-            alert("Error al comunicarse con el servidor.");
+            // arrastrar imagen dentro
+            enableDragInside(img, idx);
         });
     }
 
-    function cargarLienzo() {
-        if (!familiaId) return;
+    // =========================
+    // CARGAR IMAGEN EN UN SLOT
+    // =========================
+    function loadImageIntoSlot(slotId, file, imgElement) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const src = e.target.result;
+            imgElement.onload = function () {
+                const st = slotState.find(s => s.slotId === slotId);
+                if (!st) return;
+                const slot = imgElement.closest('.photo-slot');
+                if (!slot) return;
 
-        fetch(API_URL + "?usuario_familia_id=" + encodeURIComponent(familiaId))
-            .then(r => r.json())
-            .then(j => {
-                if (!j.ok) return;
-                if (!j.lienzo) {
-                    // no hay lienzo guardado, se queda la plantilla por defecto
-                    return;
+                const slotW = slot.clientWidth;
+                const slotH = slot.clientHeight;
+                const imgW  = imgElement.naturalWidth;
+                const imgH  = imgElement.naturalHeight;
+
+                if (imgW && imgH && slotW && slotH) {
+                    // escala para cubrir al menos ~90% del slot
+                    const scaleFit = 0.9 * Math.max(slotW / imgW, slotH / imgH);
+                    st.scale = scaleFit;
+                } else {
+                    st.scale = 1;
                 }
 
-                const lienzo = j.lienzo;
-                const plantillaId = lienzo.plantilla_id || lienzo.plantillaId || 1;
-                const datos = lienzo.datos_lienzo || lienzo.datosLienzo || {};
-
-                const plantilla = getPlantillaById(plantillaId) || getPlantillaById(1);
-                state.plantillaId = plantilla.id;
-                state.slots = [];
-
-                const slotsSaved = (datos.slots || []);
-
-                // Inicializar slots
-                plantilla.slots.forEach((_, i) => {
-                    const saved = slotsSaved.find(s => s.index === i);
-                    if (saved && saved.imgSrc) {
-                        const img = new Image();
-                        img.onload = function () {
-                            state.slots[i] = {
-                                image: img,
-                                imgSrc: saved.imgSrc,
-                                scale: saved.scale || 1,
-                                offsetX: saved.offsetX || 0,
-                                offsetY: saved.offsetY || 0
-                            };
-                            drawCanvas();
-                        };
-                        img.src = saved.imgSrc;
-                    } else {
-                        state.slots[i] = {
-                            image: null,
-                            imgSrc: null,
-                            scale: 1,
-                            offsetX: 0,
-                            offsetY: 0
-                        };
-                    }
-                });
-
-                updateSlotRects();
-                drawCanvas();
-                buildSlotControls();
-                markSelectedPlantilla(state.plantillaId);
-            })
-            .catch(() => {
-                console.warn("No se pudo cargar el lienzo guardado.");
-            });
+                st.offsetX = 0;
+                st.offsetY = 0;
+                st.imageSrc = src;
+                applyTransform(imgElement, st);
+            };
+            imgElement.src = src;
+        };
+        reader.readAsDataURL(file);
     }
 
-    // ==========================
-    // INIT
-    // ==========================
+    // =====================
+    // ZOOM EN UN SLOT
+    // =====================
+    function changeZoom(slotId, factor) {
+        const st = slotState.find(s => s.slotId === slotId);
+        if (!st) return;
+        st.scale *= factor;
+        // sin límite superior; solo mínimo para no desaparecer
+        if (st.scale < 0.1) st.scale = 0.1;
 
-    function init() {
-        buildPlantillasBar();
-        initStateForPlantilla(1); // P1 por defecto
-        resizeCanvasToContainer();
-        cargarLienzo();
-
-        window.addEventListener("resize", () => {
-            resizeCanvasToContainer();
-        });
-
-        if (btnGuardar) {
-            btnGuardar.addEventListener("click", guardarLienzo);
+        const imgElement = canvasInner.querySelector('.photo-slot[data-slot-id="' + slotId + '"] .slot-image');
+        if (imgElement) {
+            applyTransform(imgElement, st);
         }
     }
 
-    document.addEventListener("DOMContentLoaded", init);
+    // =====================
+    // ARRASTRAR DENTRO SLOT
+    // =====================
+    function enableDragInside(img, slotId) {
+        let dragging = false;
+        let startX = 0, startY = 0;
+        let originX = 0, originY = 0;
+
+        img.addEventListener('mousedown', (ev) => {
+            if (!img.src) return;
+            dragging = true;
+            startX = ev.clientX;
+            startY = ev.clientY;
+            const st = slotState.find(s => s.slotId === slotId);
+            originX = st ? st.offsetX : 0;
+            originY = st ? st.offsetY : 0;
+            ev.preventDefault();
+        });
+
+        window.addEventListener('mousemove', (ev) => {
+            if (!dragging) return;
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            const st = slotState.find(s => s.slotId === slotId);
+            if (!st) return;
+            st.offsetX = originX + dx;
+            st.offsetY = originY + dy;
+            applyTransform(img, st);
+        });
+
+        window.addEventListener('mouseup', () => {
+            dragging = false;
+        });
+    }
+
+    function applyTransform(img, st) {
+        img.style.transform =
+            'translate(-50%, -50%) translate(' + st.offsetX + 'px,' + st.offsetY + 'px) scale(' + st.scale + ')';
+    }
+
+    // ==========================
+    // CARGAR LIENZO EXISTENTE
+    // ==========================
+    function cargarLienzoServidor() {
+        if (!familiaId) {
+            console.warn('No hay familiaId en sesión');
+            return;
+        }
+        fetch('../process/lienzo_process.php?usuario_familia_id=' + encodeURIComponent(familiaId), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        })
+            .then(r => r.json())
+            .then(j => {
+                if (!j.ok) {
+                    console.warn('No se pudo cargar lienzo:', j.message);
+                    return;
+                }
+                if (!j.lienzo) {
+                    // nada guardado aún
+                    return;
+                }
+                const lienzo = j.lienzo;
+                const tplId = lienzo.plantilla_id || currentTemplateId;
+                setCurrentTemplate(tplId);
+                if (lienzo.datos_lienzo && lienzo.datos_lienzo.slots) {
+                    slotState = lienzo.datos_lienzo.slots.map(s => ({
+                        slotId: s.slotId,
+                        scale: s.scale || 1,
+                        offsetX: s.offsetX || 0,
+                        offsetY: s.offsetY || 0,
+                        imageSrc: s.imageSrc || null
+                    }));
+                    // aplicar a DOM
+                    slotState.forEach(st => {
+                        const slot = canvasInner.querySelector('.photo-slot[data-slot-id="' + st.slotId + '"]');
+                        if (!slot) return;
+                        const img = slot.querySelector('.slot-image');
+                        if (st.imageSrc) {
+                            img.src = st.imageSrc;
+                            // cuando cargue la imagen, aplicar transform
+                            img.onload = function () {
+                                applyTransform(img, st);
+                            };
+                        } else {
+                            applyTransform(img, st);
+                        }
+                    });
+                }
+            })
+            .catch(err => {
+                console.error(err);
+            });
+    }
+
+    // ============
+    // GUARDAR
+    // ============
+    function guardarLienzo() {
+        if (!familiaId) {
+            showToast('No se reconoce la sesión de familia. Vuelva a iniciar sesión.', 'error');
+            return;
+        }
+debugger;
+        const payload = {
+            usuario_familia_id: familiaId,
+            plantilla_id: currentTemplateId,
+            nombre: 'Lienzo principal',
+            datos_lienzo: {
+                plantilla_id: currentTemplateId,
+                slots: slotState
+            }
+        };
+
+        fetch('../process/lienzo_process.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json;charset=utf-8'
+            },
+            body: JSON.stringify(payload)
+        })
+            .then(r => r.json())
+            .then(j => {
+                if (j.ok) {
+                    showToast('Lienzo guardado correctamente.', 'ok');
+                } else {
+                    showToast(j.message || 'No se pudo guardar el lienzo.', 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                showToast('Error de comunicación con el servidor.', 'error');
+            });
+    }
+
+    // ======================
+    // INICIALIZACIÓN
+    // ======================
+    document.addEventListener('DOMContentLoaded', () => {
+        buildTemplateThumbs();           // crea las 10 plantillas
+        cargarLienzoServidor();          // intenta recuperar desde BD
+        btnGuardar.addEventListener('click', (e) => {
+            e.preventDefault();
+            guardarLienzo();
+        });
+    });
+
 })();

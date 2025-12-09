@@ -1,17 +1,20 @@
 <?php
 // public/EditorLienzo.php
 session_start();
-require_once dirname(__DIR__) . '/config/db.php';
 
-// Solo usuarios de tipo familia
+// solo FAMILIAS
 if (!isset($_SESSION['familia_id']) || ($_SESSION['tipo'] ?? '') !== 'familia') {
     header('Location: Login.php');
     exit;
 }
 
-$familiaId = (int)$_SESSION['familia_id'];
+$familiaId      = (int)$_SESSION['familia_id'];
 $nombreFamiliar = $_SESSION['nombre_familiar'] ?? 'Familia';
 
+// evitar volver con atrás después de logout
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -25,233 +28,363 @@ $nombreFamiliar = $_SESSION['nombre_familiar'] ?? 'Familia';
 
     <style>
         :root {
-            --vyr-green: #008798;
-            --vyr-green-dark: #006f79;
-            --bg-page: #e9f3f4;
-            --bg-lienzo: #4b5563;      /* gris medio oscuro */
-            --bg-lienzo-inner: #ffffff; /* blanco principal del lienzo */
+            --brand: #008798;
+            --brand-dark: #007582;
+            --canvas-bg: #444;   /* fondo gris oscuro del lienzo */
+            --canvas-inner: #ffffff;
+            --slot-border: #ffffff;
+            --fold-line: #bfbfbf;
         }
 
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            background-color: var(--bg-page);
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .navbar-vyr {
-            background-color: var(--vyr-green) !important;
-            color: #fff;
-        }
-
-        .navbar-vyr .navbar-brand {
-            font-weight: bold;
-        }
-
-        .navbar-vyr a {
-            color: #ffffff;
-            text-decoration: none;
-        }
-        .navbar-vyr a:hover {
-            text-decoration: underline;
-        }
-
-        .btn-vyr {
-            background-color: var(--vyr-green);
-            border-color: var(--vyr-green);
-            color: #fff;
-        }
-        .btn-vyr:hover {
-            background-color: var(--vyr-green-dark);
-            border-color: var(--vyr-green-dark);
-            color: #fff;
-        }
-
-        .editor-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 12px;
-            gap: 10px;
-        }
-
-        .plantillas-bar {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            overflow-x: auto;
-            padding: 6px 10px;
-            background: #ffffff;
-            border-radius: 8px;
-            border: 1px solid #d1d5db;
-            white-space: nowrap;
-        }
-
-        .plantilla-thumb {
-            position: relative;
-            width: 120px;
-            height: 45px;
-            background: #e5e7eb;
-            border-radius: 4px;
-            overflow: hidden;
-            cursor: pointer;
-            border: 2px solid transparent;
-            flex: 0 0 auto;
-        }
-
-        .plantilla-thumb.selected {
-            border-color: var(--vyr-green);
-            box-shadow: 0 0 0 2px rgba(0,135,152,0.2);
-        }
-
-        .plantilla-thumb-inner-margin {
-            position: absolute;
-            inset: 4px;
-            background: #f9fafb;
-        }
-
-        .plantilla-thumb-slot {
-            position: absolute;
-            background: #d1d5db;
-            border: 2px solid #ffffff;
+        * {
             box-sizing: border-box;
         }
 
-        .lienzo-wrapper {
-            flex: 1;
-            min-height: 0;
-            background: #d1d5db;
-            border-radius: 10px;
-            border: 1px solid #cbd5e1;
-            padding: 10px;
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #e9f3f4;
+            color: #222;
+        }
+
+        /* BARRA SUPERIOR (VERDE) */
+        .topbar {
+            background: var(--brand);
+            color: #fff;
+            padding: 0.6rem 1.5rem;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: space-between;
+        }
+
+        .topbar-left {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .topbar-brand {
+            font-size: 1.35rem; /* similar a navbar-brand de Eventos */
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+
+        .topbar-title-inline {
+            font-size: 1rem;
+            font-weight: 600;
+            opacity: 0.95;
+        }
+
+        .topbar-subtitle-inline {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .topbar-right {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .btn-guardar {
+            background: #ffffff;
+            color: var(--brand);
+            border: none;
+            font-weight: 600;
+            padding: 0.45rem 1.1rem;
+            border-radius: 999px;
+            font-size: 0.9rem;
+        }
+
+        .btn-guardar:hover {
+            background: #f4f4f4;
+        }
+
+        .btn-logout {
+            border-radius: 999px;
+            padding: 0.45rem 1.1rem;
+            font-size: 0.85rem;
+            border: 1px solid #ffffff;
+            color: #ffffff;
+            background: transparent;
+            text-decoration: none;
+        }
+
+        .btn-logout:hover {
+            background: rgba(255,255,255,0.16);
+            color: #ffffff;
+        }
+
+        /* CONTENEDOR PRINCIPAL */
+        .editor-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 56px); /* altura total menos barra verde aprox */
+        }
+
+        /* BARRA DE PLANTILLAS ARRIBA */
+        .templates-bar {
+            background: #ffffff;
+            padding: 0.5rem 0.75rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            overflow-x: auto;
+            white-space: nowrap;
+            flex: 0 0 auto;
+        }
+
+        .templates-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #555;
+            margin-right: 0.5rem;
+            flex: 0 0 auto;
+        }
+
+        .template-thumb {
+            flex: 0 0 auto;
+            width: 90px;
+            height: 38px;
+            border-radius: 6px;
+            background: #f0f0f0;
+            border: 2px solid transparent;
+            padding: 3px;
+            display: flex;
+            align-items: stretch;
+            justify-content: stretch;
+            cursor: pointer;
             position: relative;
         }
 
-        #lienzoCanvas {
-            display: block;
-            max-width: 100%;
-            max-height: 100%;
+        .template-thumb-inner {
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            position: relative;
+            overflow: hidden;
         }
 
-        /* Contenedor de controles por slot sobre el canvas */
-        #slotControlsContainer {
+        .template-thumb.selected {
+            border-color: var(--brand);
+            box-shadow: 0 0 0 1px rgba(0,135,152,0.35);
+        }
+
+        /* Miniaturas — recuadros internos */
+        .thumb-slot {
             position: absolute;
-            inset: 10px;
-            pointer-events: none; /* se habilita por botón */
+            background: #7F7F7F !important;  /* nuevo color */
+            border: 2px solid #ffffff;       /* líneas blancas */
+        }
+
+
+        .thumb-margin {
+            position: absolute;
+            inset: 8%;
+            border: 2px solid #ffffff !important;
+            background: transparent;
+        }
+
+
+        /* ZONA LIENZO */
+        .canvas-wrapper {
+            flex: 1 1 auto;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: stretch;
+            overflow: hidden; /* sin scroll */
+        }
+
+        .canvas-outer {
+            background: var(--canvas-bg);
+            border-radius: 0;
+            padding: 4px;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Mantener relación 60.5 x 25.4 (aprox 605:254), ocupando el alto */
+        .canvas-inner {
+            position: relative;
+            background: var(--canvas-inner);
+            height: 100%;
+            aspect-ratio: 605 / 254;
+            width: auto;
+            overflow: hidden;
+        }
+
+        /* Línea de doblez (VERTICAL SIEMPRE) */
+        .fold-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 0;
+            border-left: 2px dashed var(--fold-line); /* aprox 2mm */
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        /* SLOTS DE FOTOS EN EL LIENZO */
+        .photo-slot {
+            position: absolute;
+            border: 6px solid var(--slot-border); /* ~2 mm aprox */
+            box-sizing: border-box;
+            overflow: hidden;
+            background: #7F7F7F; /* gris medio para cada recuadro (antes #e5e5e5) */
+        }
+
+        .photo-slot-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .slot-image {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: center center;
+            transform: translate(-50%, -50%) scale(1);
+            max-width: none; /* usamos escala, no limitamos ancho */
         }
 
         .slot-controls {
             position: absolute;
+            bottom: 4px;
+            right: 4px;
             display: flex;
-            flex-direction: row;
             gap: 4px;
             background: rgba(0,0,0,0.35);
-            border-radius: 6px;
+            border-radius: 999px;
             padding: 2px 4px;
-            align-items: center;
-            pointer-events: auto;
         }
 
         .slot-btn {
             border: none;
             background: transparent;
-            color: #ffffff;
-            font-size: 14px;
+            color: #fff;
+            font-size: 0.75rem;
             width: 20px;
             height: 20px;
-            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
         }
+
         .slot-btn:hover {
-            color: #facc15;
+            background: rgba(255,255,255,0.15);
+            border-radius: 999px;
         }
 
-        .slot-btn-folder::before {
-            content: "\1F4C2"; /* carpeta */
+        input[type="file"].hidden-input {
+            display: none;
         }
 
-        .slot-btn-plus::before {
-            content: "+";
+        /* Tooltip sencillo */
+        .slot-btn[data-title] {
+            position: relative;
+        }
+        .slot-btn[data-title]:hover::after {
+            content: attr(attr-title);
+            content: attr(data-title);
+            position: absolute;
+            bottom: 130%;
+            right: 50%;
+            transform: translateX(50%);
+            background: rgba(0,0,0,0.75);
+            color: #fff;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            pointer-events: none;
         }
 
-        .slot-btn-minus::before {
-            content: "−";
-        }
-
-        .info-bar {
-            font-size: 0.9rem;
-            color: #4b5563;
+        /* Mensajes flotantes */
+        .toast-fixed {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            z-index: 9999;
+            min-width: 260px;
         }
 
         @media (max-width: 768px) {
-            .plantilla-thumb {
-                width: 100px;
-                height: 40px;
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.35rem;
+            }
+            .topbar-right {
+                width: 100%;
+                justify-content: flex-end;
+            }
+            .topbar-left {
+                justify-content: flex-start;
             }
         }
     </style>
 </head>
 <body>
 
-<!-- NAVBAR -->
-<nav class="navbar navbar-vyr px-3 py-2 d-flex justify-content-between align-items-center">
-    <div>
-        <span class="navbar-brand mb-0 h1">Editor de lienzo</span>
+<div class="topbar">
+    <div class="topbar-left">
+        <span class="topbar-brand">VyR Producciones</span>
+        <span class="topbar-title-inline">Editor de lienzo</span>
+        <span class="topbar-subtitle-inline">
+            | Familia: <strong><?php echo htmlspecialchars($nombreFamiliar); ?></strong>
+        </span>
     </div>
-    <div class="text-end">
-        <span class="me-3">Familia: <strong><?php echo htmlspecialchars($nombreFamiliar); ?></strong></span>
-        <a href="Logout.php" class="btn btn-sm btn-light">Cerrar sesión</a>
+    <div class="topbar-right">
+        <button id="btnGuardarLienzo" class="btn-guardar">Guardar</button>
+        <a class="btn-logout" href="Logout.php">Cerrar sesión</a>
     </div>
-</nav>
+</div>
 
-<div class="editor-container">
-
-    <div class="d-flex justify-content-between align-items-center mb-1">
-        <div class="info-bar">
-            Tamaño físico del lienzo: <strong>25.4 cm × 60.5 cm</strong> &nbsp;|&nbsp;
-            Líneas de separación ≈ <strong>2 mm</strong> &nbsp;|&nbsp;
-            Línea de doblez vertical solo visible en editor.
-        </div>
-        <button id="btnGuardarLienzo" class="btn btn-vyr btn-sm">
-            Guardar lienzo
-        </button>
-    </div>
+<div class="editor-wrapper">
 
     <!-- BARRA DE PLANTILLAS -->
-    <div id="plantillasBar" class="plantillas-bar">
-        <!-- Se llena desde app.js -->
+    <div class="templates-bar" id="templatesBar">
+        <div class="templates-title">Plantillas</div>
+        <!-- miniaturas se construyen desde app.js -->
     </div>
 
-    <!-- ÁREA DE LIENZO -->
-    <div class="lienzo-wrapper">
-        <canvas id="lienzoCanvas"></canvas>
-        <div id="slotControlsContainer"></div>
+    <!-- ZONA DEL LIENZO -->
+    <div class="canvas-wrapper">
+        <div class="canvas-outer">
+            <div class="canvas-inner" id="canvasInner">
+                <div class="fold-line"></div>
+                <!-- aquí JS dibuja los slots de fotos -->
+            </div>
+        </div>
     </div>
 
 </div>
 
-<!-- input oculto para cargar imágenes -->
-<input type="file" id="fileInputHidden" accept="image/*" style="display:none" />
+<!-- Toast de mensajes -->
+<div class="toast-fixed">
+    <div id="toastMsg" class="alert alert-secondary d-none mb-0"></div>
+</div>
 
-<!-- Configuración para JS -->
 <script>
-    window.VYR_LIENZO = {
-        familiaId: <?php echo (int)$familiaId; ?>,
+    window.LIENZO_CONFIG = {
+        familiaId: <?php echo $familiaId; ?>,
         nombreFamiliar: <?php echo json_encode($nombreFamiliar, JSON_UNESCAPED_UNICODE); ?>
     };
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="js/app.js"></script>
-
+<script src="js/lienzo_feedback.js"></script>
 </body>
 </html>
